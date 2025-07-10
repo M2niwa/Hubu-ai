@@ -1,0 +1,1 @@
+运行bert_train前请先执行download_model下载bert模型
