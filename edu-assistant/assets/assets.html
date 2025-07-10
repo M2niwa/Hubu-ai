@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>AI语音助手</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        #status { margin: 20px 0; padding: 10px; background: #f0f0f0; }
+        button { padding: 10px 20px; background: #4CAF50; color: white; border: none; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>AI语音助手控制面板</h1>
+    <div id="status">等待唤醒...</div>
+    <button onclick="exitApp()">退出程序</button>
+
+    <script>
+        // 调用Python退出方法
+        function exitApp() {
+            window.pywebview.api.exit_app();
+        }
+
+        // 状态更新函数（示例）
+        function updateStatus(message) {
+            document.getElementById('status').innerText = message;
+        }
+    </script>
+</body>
+</html>
