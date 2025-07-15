@@ -18,7 +18,7 @@ class DeepSeekClient:
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.temperature
         }
-        response = requests.post(self.url, headers=headers, json=payload, timeout=10)
+        response = requests.post(self.url, headers=headers, json=payload, timeout=30)
         if response.status_code == 200:
             return response.json()["choices"][0]["message"]["content"]
         else:
