@@ -1,23 +1,37 @@
 from llama_index.core import load_index_from_storage
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from core.deepseek_client import DeepSeekClient
-from llama_index.core.storage import StorageContext
+from config import settings
 
 class HybridQueryEngine:
+    """混合向量检索与大模型问答引擎"""
+    
     def __init__(self, persist_dir: str):
+        # 应用当前设置
+        from llama_index.core import Settings
+        Settings.embed_model = HuggingFaceEmbedding(
+            model_name=settings.EMBED_MODEL
+        )
+        
+        # 加载索引
         storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
         self.index = load_index_from_storage(storage_context)
-        self.deepseek = DeepSeekClient(model="deepseek-chat", temperature=0.7)
-
+        self.deepseek = DeepSeekClient()
+    
     def query(self, question: str) -> str:
+        """回答问题"""
         try:
-            # 基于向量索引检索 top-K 文档
+            # 向量检索
             query_engine = self.index.as_query_engine(similarity_top_k=3)
             context = query_engine.query(question).response
-            # 拼接查询提示并发送给 DeepSeek 模型
-            prompt = f"""以下是与问题相关的知识内容：
+            
+            # 大模型生成
+            prompt = f"""知识背景：
 {context}
 
-请根据这些内容回答用户的问题：“{question}”"""
+问题：“{question}”
+请根据以上知识回答："""
             return self.deepseek.query(prompt)
+        
         except Exception as e:
-            return f"DeepSeek 查询失败: {str(e)}"
+            return f"系统错误: {str(e)}"
