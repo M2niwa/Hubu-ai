@@ -1,43 +1,73 @@
-import os
-import pandas as pd
-from typing import List, Tuple
-from config import constants
+import torch
+import torch.nn as nn
+import pytorch_lightning as pl
+from transformers import AutoModel
+from torch.cuda.amp import autocast
 
-class DataLoader:
-    """统一数据加载器"""
+class TextClassifier(pl.LightningModule):
+    """基于预训练Transformer的文本分类模型"""
     
-    def __init__(self, data_dir: str):
-        self.data_dir = data_dir
-        self.allowed_ext = constants.ALLOWED_EXTENSIONS
-    
-    def load_texts(self) -> List[Tuple[str, int]]:
-        """加载所有文本数据"""
-        texts = []
-        labels = []
+    def __init__(self, num_classes: int, model_name: str = "bert-base-uncased", lr: float = 1e-5):
+        super().__init__()
+        self.save_hyperparameters()
         
-        """遍历目录结构"""
-        for label_dir in os.listdir(self.data_dir):
-            label_path = os.path.join(self.data_dir, label_dir)
-            if not os.path.isdir(label_path):
-                continue
-            
-            label_id = self._get_label_id(label_dir)
-            for file in os.listdir(label_path):
-                if any(file.endswith(ext) for ext in self.allowed_ext):
-                    file_path = os.path.join(label_path, file)
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        texts.append(f.read())
-                        labels.append(label_id)
+        # 骨干网络 - 预训练模型
+        self.encoder = AutoModel.from_pretrained(model_name)
         
-        return texts, labels
+        # 冻结编码器参数 (小样本场景建议)
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+        
+        # 分类头
+        hid_size = self.encoder.config.hidden_size
+        self.classifier = nn.Sequential(
+            nn.Linear(hid_size, 256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(256, num_classes)
+        )
+        
+        self.loss_fn = nn.CrossEntropyLoss()
     
-    def _get_label_id(self, label_name: str) -> int:
-        """标签名称转ID"""
-        label_map = {
-            "数学": 0,
-            "物理": 1,
-            "化学": 2,
-            "生物": 3,
-            "其他": 4
-        }
-        return label_map.get(label_name, 4)
+    def forward(self, input_ids, attention_mask):
+        # 确保输入数据在正确设备上
+        device = next(self.parameters()).device
+        input_ids = input_ids.to(device)
+        attention_mask = attention_mask.to(device)
+        
+        # 自动混合精度处理
+        with autocast(enabled=self.training and torch.cuda.is_available()):
+            outputs = self.encoder(
+                input_ids=input_ids,
+                attention_mask=attention_mask
+            )
+            # 使用[CLS]标记进行分类
+            pooled = outputs.last_hidden_state[:, 0]
+            return self.classifier(pooled)
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(
+            self.classifier.parameters(), 
+            lr=self.hparams.lr
+        )
+        return optimizer
+
+    def training_step(self, batch, batch_idx):
+        input_ids, attention_mask, labels = batch
+        logits = self(input_ids, attention_mask)
+        loss = self.loss_fn(logits, labels)
+        self.log("train_loss", loss, prog_bar=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        input_ids, attention_mask, labels = batch
+        logits = self(input_ids, attention_mask)
+        loss = self.loss_fn(logits, labels)
+        self.log("val_loss", loss, prog_bar=True)
+        return loss
+
+    def predict_step(self, batch, batch_idx):
+        input_ids, attention_mask = batch
+        logits = self(input_ids, attention_mask)
+        probs = torch.softmax(logits, dim=1)
+        return probs
